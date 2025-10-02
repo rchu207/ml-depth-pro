@@ -12,6 +12,9 @@ from torchvision.transforms import (
     Normalize,
     ToTensor,
 )
+from PIL import Image
+import PIL.Image
+from matplotlib import pyplot as plt
 try:
     import torchvision
     import torchaudio
@@ -3353,16 +3356,42 @@ def test_inference():
             ToTensor(),
             Lambda(lambda x: x.to('cpu')),
             Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
-            ConvertImageDtype(torch.half),
         ]
     )
     image = transform(image)
     if len(image.shape) == 3:
         image = image.unsqueeze(0)
-    # _, _, _, width = image.shape
+    _, _, _, width = image.shape
 
+    canonical_inverse_depth, fov_deg = net(image)
+    f_px = 0.5 * width / torch.tan(0.5 * torch.deg2rad(fov_deg.to(torch.float)))
 
-    return net(image)
+    inverse_depth = canonical_inverse_depth * (width / f_px)
+
+    depth = 1.0 / torch.clamp(inverse_depth, min=1e-4, max=1e4)
+
+    # Extract the depth and focal length.
+    depth = depth.squeeze().detach().cpu().numpy().squeeze()
+
+    inverse_depth = 1 / depth
+    # Visualize inverse depth instead of depth, clipped to [0.1m;250m] range for better visualization.
+    max_invdepth_vizu = min(inverse_depth.max(), 1 / 0.1)
+    min_invdepth_vizu = max(1 / 250, inverse_depth.min())
+    inverse_depth_normalized = (inverse_depth - min_invdepth_vizu) / (
+        max_invdepth_vizu - min_invdepth_vizu
+    )
+
+    # Save as color-mapped "turbo" jpg image.
+    cmap = plt.get_cmap("turbo")
+    color_depth = (cmap(inverse_depth_normalized)[..., :3] * 255).astype(
+        np.uint8
+    )
+    color_map_output_file = "test_heatmap2.png"
+    PIL.Image.fromarray(color_depth).save(
+        color_map_output_file, format="PNG", quality=100
+    )
+
+    return inverse_depth_normalized
 
 if __name__ == "__main__":
     # export_onnx()
