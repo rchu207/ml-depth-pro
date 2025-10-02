@@ -4,6 +4,14 @@ import tempfile, zipfile
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import cv2
+from torchvision.transforms import (
+    Compose,
+    ConvertImageDtype,
+    Lambda,
+    Normalize,
+    ToTensor,
+)
 try:
     import torchvision
     import torchaudio
@@ -3335,11 +3343,27 @@ def test_inference():
     net.float()
     net.eval()
 
-    torch.manual_seed(0)
-    v_0 = torch.rand(1, 3, 1536, 1536, dtype=torch.float)
+    # Load image.
+    filename = "data/test_input_image2.jpg"
+    raw_image = cv2.imread(filename)
+    # Possible OK when use RGB.
+    image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
+    transform = Compose(
+        [
+            ToTensor(),
+            Lambda(lambda x: x.to('cpu')),
+            Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ConvertImageDtype(torch.half),
+        ]
+    )
+    image = transform(image)
+    if len(image.shape) == 3:
+        image = image.unsqueeze(0)
+    # _, _, _, width = image.shape
 
-    return net(v_0)
+
+    return net(image)
 
 if __name__ == "__main__":
-    export_onnx()
+    # export_onnx()
     print(test_inference())
