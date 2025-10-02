@@ -9,14 +9,10 @@ import argparse
 import logging
 from pathlib import Path
 
-import numpy as np
-import PIL.Image
 import torch
 import pnnx
-from matplotlib import pyplot as plt
-from tqdm import tqdm
 
-from depth_pro import create_model_and_transforms, load_rgb
+from depth_pro import create_model_and_transforms
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +34,7 @@ def run(args):
 
     # Trace model.
     LOGGER.info(f"Create model.")
-    model_cpu, transform_cpu = create_model_and_transforms(
+    model_cpu, _ = create_model_and_transforms(
     )
     LOGGER.info(f"Evaluate model.")
     model_cpu.eval()
@@ -46,7 +42,7 @@ def run(args):
     input_shape = (1, 3, 1536, 1536)
     example_input = torch.rand(input_shape)
     LOGGER.info(f"Use pnnx to convert model.")
-    opt_model = pnnx.export(model_cpu, "dptpro9261019.pt", example_input)
+    pnnx.export(model_cpu, "dptpro.pt", example_input)
     LOGGER.info(f"Use pnnx to convert model - done.")
 
 
@@ -59,18 +55,19 @@ def main():
         "-i", 
         "--image-path", 
         type=Path, 
-        default="./data/example.jpg",
+        default="./data/test_input_image.jpg",
         help="Path to input image.",
     )
     parser.add_argument(
         "-o",
         "--output-path",
         type=Path,
+        default="./output",
         help="Path to store output files.",
     )
     parser.add_argument(
         "--skip-display",
-        action="store_true",
+        default=True,
         help="Skip matplotlib display.",
     )
     parser.add_argument(
