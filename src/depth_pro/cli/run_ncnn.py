@@ -32,7 +32,7 @@ def run(args):
     if args.verbose:
         logging.basicConfig(level=logging.INFO)
 
-    # Trace model.
+    # Trace model with FP32.
     LOGGER.info(f"Create model.")
     model_cpu, _ = create_model_and_transforms(
     )
