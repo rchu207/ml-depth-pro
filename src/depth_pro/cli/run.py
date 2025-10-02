@@ -5,6 +5,7 @@ Copyright (C) 2024 Apple Inc. All Rights Reserved.
 """
 
 
+import cv2
 import argparse
 import logging
 from pathlib import Path
@@ -14,7 +15,15 @@ import PIL.Image
 import torch
 from matplotlib import pyplot as plt
 from tqdm import tqdm
-
+from PIL import Image
+from torchvision.transforms import (
+    Compose,
+    ConvertImageDtype,
+    Lambda,
+    Normalize,
+    ToTensor,
+)
+from torch import nn
 from depth_pro import create_model_and_transforms, load_rgb
 
 LOGGER = logging.getLogger(__name__)
@@ -36,85 +45,78 @@ def run(args):
         logging.basicConfig(level=logging.INFO)
 
     # Load model.
-    model, transform = create_model_and_transforms(
+    model, _ = create_model_and_transforms(
         device=get_torch_device(),
         precision=torch.half,
     )
     model.eval()
 
-    image_paths = [args.image_path]
-    if args.image_path.is_dir():
-        image_paths = args.image_path.glob("**/*")
-        relative_path = args.image_path
-    else:
-        relative_path = args.image_path.parent
+    # Load image.
+    filename = "data/test_input_image2.jpg"
+    LOGGER.info(f"Loading image {filename} ...")
+    raw_image = cv2.imread(filename)
+    # Possible OK when use RGB.
+    image = cv2.cvtColor(raw_image, cv2.COLOR_BGR2RGB)
+    transform = Compose(
+        [
+            ToTensor(),
+            Lambda(lambda x: x.to(get_torch_device())),
+            Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+            ConvertImageDtype(torch.half),
+        ]
+    )
+    image = transform(image)
 
-    if not args.skip_display:
-        plt.ion()
-        fig = plt.figure()
-        ax_rgb = fig.add_subplot(121)
-        ax_disp = fig.add_subplot(122)
+    f_px = None
 
-    for image_path in tqdm(image_paths):
-        # Load image and focal length from exif info (if found.).
-        try:
-            LOGGER.info(f"Loading image {image_path} ...")
-            image, _, f_px = load_rgb(image_path)
-        except Exception as e:
-            LOGGER.error(str(e))
-            continue
-        # Run prediction. If `f_px` is provided, it is used to estimate the final metric depth,
-        # otherwise the model estimates `f_px` to compute the depth metricness.
-        prediction = model.infer(transform(image), f_px=f_px)
+    prediction = model.infer(image, f_px=f_px)
+    depth = prediction["depth"].detach().cpu().numpy().squeeze()
 
-        # Extract the depth and focal length.
-        depth = prediction["depth"].detach().cpu().numpy().squeeze()
-        if f_px is not None:
-            LOGGER.debug(f"Focal length (from exif): {f_px:0.2f}")
-        elif prediction["focallength_px"] is not None:
-            focallength_px = prediction["focallength_px"].detach().cpu().item()
-            LOGGER.info(f"Estimated focal length: {focallength_px}")
+    # if len(image.shape) == 3:
+    #     image = image.unsqueeze(0)
+    # _, _, _, width = image.shape
 
-        inverse_depth = 1 / depth
-        # Visualize inverse depth instead of depth, clipped to [0.1m;250m] range for better visualization.
-        max_invdepth_vizu = min(inverse_depth.max(), 1 / 0.1)
-        min_invdepth_vizu = max(1 / 250, inverse_depth.min())
-        inverse_depth_normalized = (inverse_depth - min_invdepth_vizu) / (
-            max_invdepth_vizu - min_invdepth_vizu
-        )
+    # Run prediction.
+    # canonical_inverse_depth, fov_deg = model.forward(image)
+    # if f_px is None:
+    #     f_px = 0.5 * width / torch.tan(0.5 * torch.deg2rad(fov_deg.to(torch.float)))
+    #
+    # inverse_depth = canonical_inverse_depth * (width / f_px)
+    #
+    # depth = 1.0 / torch.clamp(inverse_depth, min=1e-4, max=1e4)
+    #
+    # # Extract the depth and focal length.
+    # depth = depth.squeeze().detach().cpu().numpy().squeeze()
 
-        # Save Depth as npz file.
-        if args.output_path is not None:
-            output_file = (
-                args.output_path
-                / image_path.relative_to(relative_path).parent
-                / image_path.stem
-            )
-            LOGGER.info(f"Saving depth map to: {str(output_file)}")
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(output_file, depth=depth)
+    inverse_depth = 1 / depth
+    # Visualize inverse depth instead of depth, clipped to [0.1m;250m] range for better visualization.
+    max_invdepth_vizu = min(inverse_depth.max(), 1 / 0.1)
+    min_invdepth_vizu = max(1 / 250, inverse_depth.min())
+    inverse_depth_normalized = (inverse_depth - min_invdepth_vizu) / (
+        max_invdepth_vizu - min_invdepth_vizu
+    )
 
-            # Save as color-mapped "turbo" jpg image.
-            cmap = plt.get_cmap("turbo")
-            color_depth = (cmap(inverse_depth_normalized)[..., :3] * 255).astype(
-                np.uint8
-            )
-            color_map_output_file = str(output_file) + ".jpg"
-            LOGGER.info(f"Saving color-mapped depth to: : {color_map_output_file}")
-            PIL.Image.fromarray(color_depth).save(
-                color_map_output_file, format="JPEG", quality=90
-            )
+    # Save as color-mapped "turbo" jpg image.
+    output_file = "test_heatmap1.jpg"
+    depth = (inverse_depth_normalized[..., :3] * 255).astype(
+        np.uint8
+    )
+    PIL.Image.fromarray(depth).save(
+        output_file, format="PNG", quality=100
+    )
 
-        # Display the image and estimated depth map.
-        if not args.skip_display:
-            ax_rgb.imshow(image)
-            ax_disp.imshow(inverse_depth_normalized, cmap="turbo")
-            fig.canvas.draw()
-            fig.canvas.flush_events()
+    # Save as color-mapped "turbo" jpg image.
+    cmap = plt.get_cmap("turbo")
+    color_depth = (cmap(inverse_depth_normalized)[..., :3] * 255).astype(
+        np.uint8
+    )
+    color_map_output_file = "test_heatmap2.png"
+    LOGGER.info(f"Saving color-mapped depth to: : {color_map_output_file}")
+    PIL.Image.fromarray(color_depth).save(
+        color_map_output_file, format="PNG", quality=100
+    )
 
     LOGGER.info("Done predicting depth!")
-    if not args.skip_display:
-        plt.show(block=True)
 
 
 def main():
