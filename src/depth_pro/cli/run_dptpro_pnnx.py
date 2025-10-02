@@ -3338,7 +3338,7 @@ def export_onnx():
     torch.manual_seed(0)
     v_0 = torch.rand(1, 3, 1536, 1536, dtype=torch.float)
 
-    torch.onnx.export(net, v_0, "dptpro_pnnx.py.onnx", export_params=True, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=13, input_names=['in0'], output_names=['out0'])
+    torch.onnx.export(net, v_0, "dptpro_pnnx.py.onnx", export_params=True, operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK, opset_version=13, input_names=['image'], output_names=['depth', 'focallength_px'])
 
 @torch.no_grad()
 def test_inference():
@@ -3394,5 +3394,7 @@ def test_inference():
     return inverse_depth_normalized
 
 if __name__ == "__main__":
+    print('Start')
     # export_onnx()
     print(test_inference())
+    print('Done')
